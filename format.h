@@ -1911,7 +1911,8 @@ struct ArgArray {
   enum { SIZE = N + (N == 0 || N >= ArgList::MAX_PACKED_ARGS ? 1 : 0) };
 
   typedef typename Conditional<
-    (N < ArgList::MAX_PACKED_ARGS), Value, Arg>::type Type[SIZE];
+    (N < ArgList::MAX_PACKED_ARGS), Value, Arg>::type Element;
+  typedef Element Type[SIZE];
 };
 
 #if FMT_USE_VARIADIC_TEMPLATES
@@ -3256,14 +3257,39 @@ void arg(WStringRef, const internal::NamedArg<Char>&) FMT_DELETED_OR_UNDEFINED;
 #define FMT_GET_ARG_NAME(type, index) arg##index
 
 #if FMT_USE_VARIADIC_TEMPLATES
+
+namespace fmt {
+namespace internal {
+
+template <typename Formatter>
+struct MakeArg : Arg {
+  template <typename T>
+  MakeArg(const T &value) : Arg(MakeValue<Formatter>(value)) {
+    type = static_cast<Arg::Type>(MakeValue<Formatter>::type(value));
+  }
+};
+
+template <typename Formatter, typename Element>
+struct SelectMake;
+
+template <typename Formatter>
+struct SelectMake<Formatter, Value> { typedef MakeValue<Formatter> Make; };
+
+template <typename Formatter>
+struct SelectMake<Formatter, Arg> { typedef MakeArg<Formatter> Make; };
+}
+}
+
 # define FMT_VARIADIC_(Char, ReturnType, func, call, ...) \
   template <typename... Args> \
   ReturnType func(FMT_FOR_EACH(FMT_ADD_ARG_NAME, __VA_ARGS__), \
       const Args & ... args) { \
-    typename fmt::internal::ArgArray<sizeof...(Args)>::Type array; \
+    typedef fmt::internal::ArgArray<sizeof...(Args)> ArgArray; \
+    typename ArgArray::Type array{ \
+      typename fmt::internal::SelectMake<fmt::BasicFormatter<Char>, \
+      typename ArgArray::Element>::Make(args)...}; \
     call(FMT_FOR_EACH(FMT_GET_ARG_NAME, __VA_ARGS__), \
-      fmt::internal::make_arg_list< \
-        fmt::BasicFormatter<Char> >(array, args...)); \
+      fmt::ArgList(fmt::internal::make_type(args...), array)); \
   }
 #else
 // Defines a wrapper for a function taking __VA_ARGS__ arguments
